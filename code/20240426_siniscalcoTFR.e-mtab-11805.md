@@ -407,7 +407,7 @@ DimPlot(foxp3Obj, group.by = "FOXP3_subset", label = TRUE) +
   theme(legend.position = "none")
 ```
 
-![](../figure/foxp3-add-treg-tfr-lable-plot-1.png)<!-- -->
+![](../figure/foxp3-add-treg-tfr-label-plot-1.png)<!-- -->
 
 # Data integration by CCA stimulated T
 
@@ -415,54 +415,101 @@ DimPlot(foxp3Obj, group.by = "FOXP3_subset", label = TRUE) +
 Idents(seuratObj) <- seuratObj$Characteristics.cell.type.
 stimObj <- subset(seuratObj, ident = "CTB tetramer binding T cell")
 stimObj[["RNA"]] <- split(stimObj[["RNA"]], f = stimObj$orig.ident)
-stimObj <- NormalizeData(stimObj)
-stimObj <- FindVariableFeatures(stimObj)
-stimObj <- ScaleData(stimObj)
-stimObj <- RunPCA(stimObj)
+stimObj <- NormalizeData(stimObj, verbose = FALSE)
+stimObj <- FindVariableFeatures(stimObj, verbose = FALSE)
+stimObj <- ScaleData(stimObj, verbose = FALSE)
+stimObj <- RunPCA(stimObj, verbose = FALSE)
 stimObj <- IntegrateLayers(object         = stimObj, 
                             method         = CCAIntegration, 
                             orig.reduction = "pca", 
-                            new.reduction  = "integrated.cca")
+                            new.reduction  = "integrated.cca",
+                            verbose = FALSE)
 
 stimObj[["RNA"]] <- JoinLayers(stimObj[["RNA"]])
-stimObj <- RunUMAP(stimObj, dims = 1:10, n.components = 2L, reduction = "integrated.cca")
+stimObj <- RunUMAP(stimObj, dims = 1:10, n.components = 2L, reduction = "integrated.cca", verbose = FALSE)
+save(stimObj, file = file.path(workDir, "output/stimObj.cca.RData"))
+```
 
+UMAP with cells colored by sample id
+
+``` r
 DimPlot(stimObj, reduction = "umap", group.by = "orig.ident")
+```
+
+![](../figure/cca-stim-plot-1-1.png)<!-- -->
+
+UMAP with cells colored by seq technology
+
+``` r
 DimPlot(stimObj, reduction = "umap", group.by = "Comment.library.construction.")
 ```
 
+![](../figure/cca-stim-plot-2-1.png)<!-- -->
+
+Expression of canonical markers (Cd4, Cd8, Foxp3)
+
 ``` r
-load(file = file.path(workDir, "data/stimObj.cca.RData"))
+FeaturePlot(object   = stimObj,
+            features = c("Cd4", "Cd8a", "Cd8b1", "Foxp3"))
 ```
 
-Expression of canonical markers (CD4, CD8, FOXP3)
+<img src="../figure/cd4-foxp3-stim-1.png" style="display: block; margin: auto auto auto 0;" />
+There is a cluster of Foxp3 expressing cells among T cells
+
+Identify cluster of Foxp3 expressing cells
 
 ``` r
-FeaturePlot(object = stimObj,
-                     features = c("Cd4", "Cd8a", "Cd8b1", "Foxp3"))
+stimObj <- FindNeighbors(stimObj, reduction = "umap", dims = 1:2, verbose = FALSE)
+stimObj <- FindClusters(stimObj, resolution = 0.5, verbose = FALSE)
+save(stimObj, file = file.path(workDir, "output/stimObj.cca.RData"))
 ```
 
 ``` r
-stimObj <- FindNeighbors(stimObj, reduction = "umap", dims = 1:2)
-stimObj <- FindClusters(stimObj, resolution = 0.5)
+plotStimfoxp3 <- FeaturePlot(object = stimObj, features = "Foxp3") +
+  theme(legend.position = "bottom")
 
-p1 <- FeaturePlot(object = stimObj, features = "Foxp3")
-
-p2 <- DimPlot(object = stimObj, group.by = "seurat_clusters", label = TRUE) +
+plotStimcluster <- DimPlot(object = stimObj, group.by = "seurat_clusters", label = TRUE) +
   theme(legend.position = "none")
-ggarrange(p1,p2)
+ggarrange(plotStimfoxp3, plotStimcluster, common.legend = TRUE)
+```
 
+<img src="../figure/cluster-foxp3-plot-stim-1.png" style="display: block; margin: auto auto auto 0;" />
+Clusters 12, 15, 18, 22 express Foxp3.
+
+# Extract Foxp3 expressing cells
+
+``` r
 # FOXP3 pos: 12, 15, 18, 22
 Idents(stimObj) <- stimObj$seurat_clusters
 foxp3stimObj <- subset(stimObj, idents = c(12, 15, 18, 22)) 
 foxp3stimObj <- foxp3stimObj %>%
-  RunPCA() %>%
-  RunUMAP(dims = 1:10, n.components = 2L)
-
-FeaturePlot(foxp3stimObj, feature = c("Foxp3", "Cd4", "Il2ra", "Pdcd1", "Cxcr5"))
+  RunPCA(verbose = FALSE) %>%
+  RunUMAP(dims = 1:10, n.components = 2L, verbose = FALSE)
+save(foxp3stimObj, file = file.path(workDir, "output/foxp3Obj.stim.RData"))
 ```
 
 ``` r
+FeaturePlot(foxp3stimObj, feature = c("Foxp3", "Cd4", "Il2ra", "Pdcd1", "Cxcr5"))
+```
+
+![](../figure/extract-foxp3-plot-stim-1.png)<!-- -->
+
+# Identify TFR
+
+Use Le Coz C et al DEG to distinguish Foxp3 cells into Treg and Tfr
+
+``` r
+degDF <- read_csv(file = file.path(workDir, "output/gse214572.deg_treg_tfr.csv"))
+human <- useMart(biomart = "ensembl", 
+                 dataset = "hsapiens_gene_ensembl",
+                 host    = "https://dec2021.archive.ensembl.org/")
+mouse <- useMart(biomart = "ensembl", 
+                 dataset="mmusculus_gene_ensembl",
+                 host    = "https://dec2021.archive.ensembl.org/")
+human2mouse <- getLDS(mart = human, attributes = "hgnc_symbol", 
+                      filters = "hgnc_symbol", values = degDF$values, 
+                      attributesL = "mgi_symbol", martL = mouse)
+
 featLS <- merge(x = degDF, y = human2mouse, by.x = "values", by.y = "HGNC.symbol") %>%
   select(MGI.symbol, ind) %>%
   unstack()
@@ -474,24 +521,138 @@ foxp3stimObj$Tfr_mod <- foxp3stimObj$Module1
 foxp3stimObj$Treg_mod <- foxp3stimObj$Module2
 foxp3stimObj$Module1 <- NULL
 foxp3stimObj$Module2 <- NULL
+save(foxp3stimObj, file = file.path(workDir, "output/foxp3Obj.stim.RData"))
+```
 
-p6 <- FeaturePlot(foxp3stimObj, features = c("Tfr_mod", "Treg_mod"))
+UMAP plotting the expression of Tfr and Treg signatures from Le Coz C et
+al dataset
 
+``` r
+plotStimTregTfr <- FeaturePlot(foxp3stimObj, features = c("Tfr_mod", "Treg_mod"), combine = FALSE)
+ggarrange(plotStimTregTfr[[1]], plotStimTregTfr[[2]])
+```
+
+![](../figure/gse214572-plot-stim-1.png)<!-- -->
+
+``` r
+# look at Flow markers of Tfr
 FeaturePlot(foxp3stimObj, features = c("Pdcd1", "Cxcr5"))
+```
 
-foxp3stimObj <- FindNeighbors(foxp3stimObj, reduction = "umap", dims = 1:2)
-foxp3stimObj <- FindClusters(foxp3stimObj, resolution = 0.5)
+![](../figure/gse214572-plot-stim-2.png)<!-- -->
 
-p7 <- DimPlot(foxp3stimObj, group.by = "seurat_clusters", label = TRUE) +
+Clustering of Foxp3 expressing cells and seperation of Treg and Tfr
+
+``` r
+foxp3stimObj <- FindNeighbors(foxp3stimObj, reduction = "umap", dims = 1:2, verbose = FALSE)
+foxp3stimObj <- FindClusters(foxp3stimObj, resolution = 0.5, verbose = FALSE)
+save(foxp3stimObj, file = file.path(workDir, "output/foxp3Obj.stim.RData"))
+```
+
+``` r
+plotStimFoxp3Cluster <- DimPlot(foxp3stimObj, group.by = "seurat_clusters", label = TRUE) +
   theme(legend.position = "none")
- ggarrange(p7, p6)
- 
-foxp3stimObj <- AddMetaData(foxp3stimObj,
-                        metadata = ifelse(test = foxp3stimObj$seurat_clusters %in% c(1, 3, 4, 6, 14),
-                                          yes  = "Tfr",
-                                          no   = "Treg"),
-                        col.name = "FOXP3_subset")
+ggarrange(plotStimFoxp3Cluster, plotStimTregTfr[[1]], plotStimTregTfr[[2]], legend = FALSE, nrow = 1)
+```
 
- DimPlot(foxp3stimObj, group.by = "FOXP3_subset", label = TRUE) +
+<img src="../figure/foxp3-cluster-plot-stim-1.png" style="display: block; margin: auto auto auto 0;" />
+Clusters 1, 3, 4, 6, 14 are Tfrs.
+
+Add Treg/Tfr labels
+
+``` r
+foxp3stimObj <- AddMetaData(foxp3stimObj,
+                            metadata = ifelse(test = foxp3stimObj$seurat_clusters %in% c(1, 3, 4, 6, 14),
+                                              yes  = "Tfr",
+                                              no   = "Treg"),
+                            col.name = "FOXP3_subset")
+save(foxp3stimObj, file = file.path(workDir, "output/foxp3Obj.stim.RData"))
+```
+
+``` r
+DimPlot(foxp3stimObj, group.by = "FOXP3_subset", label = TRUE) +
   theme(legend.position = "none")
 ```
+
+![](../figure/foxp3-add-treg-tfr-label-plot-stim-1.png)<!-- -->
+
+# Session Info
+
+``` r
+sessionInfo()
+```
+
+    ## R version 4.4.0 (2024-04-24)
+    ## Platform: aarch64-apple-darwin23.4.0
+    ## Running under: macOS Sonoma 14.4.1
+    ## 
+    ## Matrix products: default
+    ## BLAS:   /opt/homebrew/Cellar/openblas/0.3.27/lib/libopenblasp-r0.3.27.dylib 
+    ## LAPACK: /opt/homebrew/Cellar/r/4.4.0/lib/R/lib/libRlapack.dylib;  LAPACK version 3.12.0
+    ## 
+    ## locale:
+    ## [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+    ## 
+    ## time zone: America/Chicago
+    ## tzcode source: internal
+    ## 
+    ## attached base packages:
+    ## [1] stats     graphics  grDevices utils     datasets  methods   base     
+    ## 
+    ## other attached packages:
+    ##  [1] lubridate_1.9.3    forcats_1.0.0      stringr_1.5.1      dplyr_1.1.4       
+    ##  [5] purrr_1.0.2        readr_2.1.5        tidyr_1.3.1        tibble_3.2.1      
+    ##  [9] tidyverse_2.0.0    ggpubr_0.6.0       ggplot2_3.5.1      harmony_1.2.0     
+    ## [13] Rcpp_1.0.12        readxl_1.4.3       biomaRt_2.59.1     Seurat_5.0.3      
+    ## [17] SeuratObject_5.0.1 sp_2.1-3           hdf5r_1.3.10       knitr_1.46        
+    ## 
+    ## loaded via a namespace (and not attached):
+    ##   [1] RcppAnnoy_0.0.22        splines_4.4.0           later_1.3.2            
+    ##   [4] filelock_1.0.3          cellranger_1.1.0        polyclip_1.10-6        
+    ##   [7] fastDummies_1.7.3       lifecycle_1.0.4         httr2_1.0.1            
+    ##  [10] rstatix_0.7.2           globals_0.16.3          lattice_0.22-6         
+    ##  [13] MASS_7.3-60.2           backports_1.4.1         magrittr_2.0.3         
+    ##  [16] plotly_4.10.4           rmarkdown_2.26          yaml_2.3.8             
+    ##  [19] httpuv_1.6.15           sctransform_0.4.1       spam_2.10-0            
+    ##  [22] spatstat.sparse_3.0-3   reticulate_1.36.1       cowplot_1.1.3          
+    ##  [25] pbapply_1.7-2           DBI_1.2.2               RColorBrewer_1.1-3     
+    ##  [28] abind_1.4-5             zlibbioc_1.49.3         Rtsne_0.17             
+    ##  [31] BiocGenerics_0.49.1     rappdirs_0.3.3          GenomeInfoDbData_1.2.12
+    ##  [34] IRanges_2.37.1          S4Vectors_0.41.7        ggrepel_0.9.5          
+    ##  [37] irlba_2.3.5.1           listenv_0.9.1           spatstat.utils_3.0-4   
+    ##  [40] goftest_1.2-3           RSpectra_0.16-1         spatstat.random_3.2-3  
+    ##  [43] fitdistrplus_1.1-11     parallelly_1.37.1       leiden_0.4.3.1         
+    ##  [46] codetools_0.2-20        xml2_1.3.6              tidyselect_1.2.1       
+    ##  [49] farver_2.1.1            UCSC.utils_0.99.7       matrixStats_1.3.0      
+    ##  [52] stats4_4.4.0            BiocFileCache_2.11.2    spatstat.explore_3.2-7 
+    ##  [55] jsonlite_1.8.8          progressr_0.14.0        ggridges_0.5.6         
+    ##  [58] survival_3.6-4          tools_4.4.0             progress_1.2.3         
+    ##  [61] ica_1.0-3               glue_1.7.0              gridExtra_2.3          
+    ##  [64] xfun_0.43               GenomeInfoDb_1.39.14    withr_3.0.0            
+    ##  [67] fastmap_1.1.1           fansi_1.0.6             digest_0.6.35          
+    ##  [70] timechange_0.3.0        R6_2.5.1                mime_0.12              
+    ##  [73] colorspace_2.1-0        scattermore_1.2         tensor_1.5             
+    ##  [76] spatstat.data_3.0-4     RSQLite_2.3.6           utf8_1.2.4             
+    ##  [79] generics_0.1.3          data.table_1.15.4       prettyunits_1.2.0      
+    ##  [82] httr_1.4.7              htmlwidgets_1.6.4       uwot_0.2.2             
+    ##  [85] pkgconfig_2.0.3         gtable_0.3.5            blob_1.2.4             
+    ##  [88] lmtest_0.9-40           XVector_0.43.1          htmltools_0.5.8.1      
+    ##  [91] carData_3.0-5           dotCall64_1.1-1         scales_1.3.0           
+    ##  [94] Biobase_2.63.1          png_0.1-8               rstudioapi_0.16.0      
+    ##  [97] tzdb_0.4.0              reshape2_1.4.4          nlme_3.1-164           
+    ## [100] curl_5.2.1              cachem_1.0.8            zoo_1.8-12             
+    ## [103] KernSmooth_2.23-22      parallel_4.4.0          miniUI_0.1.1.1         
+    ## [106] AnnotationDbi_1.65.2    pillar_1.9.0            grid_4.4.0             
+    ## [109] vctrs_0.6.5             RANN_2.6.1              promises_1.3.0         
+    ## [112] car_3.1-2               dbplyr_2.5.0            xtable_1.8-4           
+    ## [115] cluster_2.1.6           evaluate_0.23           cli_3.6.2              
+    ## [118] compiler_4.4.0          rlang_1.1.3             crayon_1.5.2           
+    ## [121] future.apply_1.11.2     ggsignif_0.6.4          labeling_0.4.3         
+    ## [124] plyr_1.8.9              stringi_1.8.3           viridisLite_0.4.2      
+    ## [127] deldir_2.0-4            munsell_0.5.1           Biostrings_2.71.6      
+    ## [130] lazyeval_0.2.2          spatstat.geom_3.2-9     Matrix_1.7-0           
+    ## [133] RcppHNSW_0.6.0          hms_1.1.3               patchwork_1.2.0        
+    ## [136] bit64_4.0.5             future_1.33.2           KEGGREST_1.43.1        
+    ## [139] shiny_1.8.1.1           highr_0.10              ROCR_1.0-11            
+    ## [142] igraph_2.0.3            broom_1.0.5             memoise_2.0.1          
+    ## [145] bit_4.0.5

@@ -351,63 +351,102 @@ foxp3Obj <- AddMetaData(foxp3Obj,
 save(foxp3Obj, file = file.path(workDir, "output/foxp3Obj.unstim.RData"))
 ```
 
-```{r foxp3-add-treg-tfr-lable-plot, fig.width=4, fig.height=4}
+```{r foxp3-add-treg-tfr-label-plot, fig.width=4, fig.height=4}
 DimPlot(foxp3Obj, group.by = "FOXP3_subset", label = TRUE) +
   theme(legend.position = "none")
 ```
 
 # Data integration by CCA stimulated T
-```{r cca-stim, eval=FALSE}
+```{r load-stimobj, echo=FALSE}
+load(file = file.path(workDir, "output/stimObj.cca.RData"))
+```
+
+```{r cca-stim, warning=FALSE, message=FALSE, eval=FALSE}
 Idents(seuratObj) <- seuratObj$Characteristics.cell.type.
 stimObj <- subset(seuratObj, ident = "CTB tetramer binding T cell")
 stimObj[["RNA"]] <- split(stimObj[["RNA"]], f = stimObj$orig.ident)
-stimObj <- NormalizeData(stimObj)
-stimObj <- FindVariableFeatures(stimObj)
-stimObj <- ScaleData(stimObj)
-stimObj <- RunPCA(stimObj)
+stimObj <- NormalizeData(stimObj, verbose = FALSE)
+stimObj <- FindVariableFeatures(stimObj, verbose = FALSE)
+stimObj <- ScaleData(stimObj, verbose = FALSE)
+stimObj <- RunPCA(stimObj, verbose = FALSE)
 stimObj <- IntegrateLayers(object         = stimObj, 
                             method         = CCAIntegration, 
                             orig.reduction = "pca", 
-                            new.reduction  = "integrated.cca")
+                            new.reduction  = "integrated.cca",
+                            verbose = FALSE)
 
 stimObj[["RNA"]] <- JoinLayers(stimObj[["RNA"]])
-stimObj <- RunUMAP(stimObj, dims = 1:10, n.components = 2L, reduction = "integrated.cca")
+stimObj <- RunUMAP(stimObj, dims = 1:10, n.components = 2L, reduction = "integrated.cca", verbose = FALSE)
+save(stimObj, file = file.path(workDir, "output/stimObj.cca.RData"))
+```
 
+UMAP with cells colored by sample id
+```{r cca-stim-plot-1, fig.width=6.25, fig.height=4}
 DimPlot(stimObj, reduction = "umap", group.by = "orig.ident")
+```
+
+UMAP with cells colored by seq technology
+```{r cca-stim-plot-2, fig.width=5, fig.height=4}
 DimPlot(stimObj, reduction = "umap", group.by = "Comment.library.construction.")
 ```
 
-```{r load-stimobj, eval=FALSE}
-load(file = file.path(workDir, "data/stimObj.cca.RData"))
+Expression of canonical markers (Cd4, Cd8, Foxp3)
+```{r cd4-foxp3-stim, fig.height=6, fig.width=7, fig.align="left"}
+FeaturePlot(object   = stimObj,
+            features = c("Cd4", "Cd8a", "Cd8b1", "Foxp3"))
 ```
-
-Expression of canonical markers (CD4, CD8, FOXP3)
-```{r cd4-foxp3-stim, fig.height=2.75, fig.align="left", eval=FALSE}
-FeaturePlot(object = stimObj,
-                     features = c("Cd4", "Cd8a", "Cd8b1", "Foxp3"))
-```
-
+There is a cluster of Foxp3 expressing cells among T cells
+  
+Identify cluster of Foxp3 expressing cells
 ```{r cluster-foxp3-stim, eval=FALSE}
-stimObj <- FindNeighbors(stimObj, reduction = "umap", dims = 1:2)
-stimObj <- FindClusters(stimObj, resolution = 0.5)
+stimObj <- FindNeighbors(stimObj, reduction = "umap", dims = 1:2, verbose = FALSE)
+stimObj <- FindClusters(stimObj, resolution = 0.5, verbose = FALSE)
+save(stimObj, file = file.path(workDir, "output/stimObj.cca.RData"))
+```
 
-p1 <- FeaturePlot(object = stimObj, features = "Foxp3")
+```{r cluster-foxp3-plot-stim, fig.height=4, fig.width=6.25, fig.align="left"}
+plotStimfoxp3 <- FeaturePlot(object = stimObj, features = "Foxp3") +
+  theme(legend.position = "bottom")
 
-p2 <- DimPlot(object = stimObj, group.by = "seurat_clusters", label = TRUE) +
+plotStimcluster <- DimPlot(object = stimObj, group.by = "seurat_clusters", label = TRUE) +
   theme(legend.position = "none")
-ggarrange(p1,p2)
+ggarrange(plotStimfoxp3, plotStimcluster, common.legend = TRUE)
+```
+Clusters 12, 15, 18, 22 express Foxp3.
+  
+# Extract Foxp3 expressing cells
+```{r load-foxp3-stim, echo=FALSE}
+load(file = file.path(workDir, "output/foxp3Obj.stim.RData"))
+```
 
+```{r extract-foxp3-stim, warning=FALSE, eval=FALSE}
 # FOXP3 pos: 12, 15, 18, 22
 Idents(stimObj) <- stimObj$seurat_clusters
 foxp3stimObj <- subset(stimObj, idents = c(12, 15, 18, 22)) 
 foxp3stimObj <- foxp3stimObj %>%
-  RunPCA() %>%
-  RunUMAP(dims = 1:10, n.components = 2L)
+  RunPCA(verbose = FALSE) %>%
+  RunUMAP(dims = 1:10, n.components = 2L, verbose = FALSE)
+save(foxp3stimObj, file = file.path(workDir, "output/foxp3Obj.stim.RData"))
+```
 
+```{r extract-foxp3-plot-stim, fig.height=7, fig.width=6}
 FeaturePlot(foxp3stimObj, feature = c("Foxp3", "Cd4", "Il2ra", "Pdcd1", "Cxcr5"))
 ```
 
+# Identify TFR
+Use Le Coz C et al DEG to distinguish Foxp3 cells into Treg and Tfr
 ```{r gse214572-stim, eval=FALSE}
+degDF <- read_csv(file = file.path(workDir, "output/gse214572.deg_treg_tfr.csv"))
+human <- useMart(biomart = "ensembl", 
+                 dataset = "hsapiens_gene_ensembl",
+                 host    = "https://dec2021.archive.ensembl.org/")
+mouse <- useMart(biomart = "ensembl", 
+                 dataset="mmusculus_gene_ensembl",
+                 host    = "https://dec2021.archive.ensembl.org/")
+human2mouse <- getLDS(mart = human, attributes = "hgnc_symbol", 
+                      filters = "hgnc_symbol", values = degDF$values, 
+                      attributesL = "mgi_symbol", martL = mouse)
+
 featLS <- merge(x = degDF, y = human2mouse, by.x = "values", by.y = "HGNC.symbol") %>%
   select(MGI.symbol, ind) %>%
   unstack()
@@ -419,25 +458,47 @@ foxp3stimObj$Tfr_mod <- foxp3stimObj$Module1
 foxp3stimObj$Treg_mod <- foxp3stimObj$Module2
 foxp3stimObj$Module1 <- NULL
 foxp3stimObj$Module2 <- NULL
+save(foxp3stimObj, file = file.path(workDir, "output/foxp3Obj.stim.RData"))
+```
 
-p6 <- FeaturePlot(foxp3stimObj, features = c("Tfr_mod", "Treg_mod"))
-
+UMAP plotting the expression of Tfr and Treg signatures from Le Coz C et al dataset
+```{r gse214572-plot-stim, fig.width=8, fig.height=3.5}
+plotStimTregTfr <- FeaturePlot(foxp3stimObj, features = c("Tfr_mod", "Treg_mod"), combine = FALSE)
+ggarrange(plotStimTregTfr[[1]], plotStimTregTfr[[2]])
+# look at Flow markers of Tfr
 FeaturePlot(foxp3stimObj, features = c("Pdcd1", "Cxcr5"))
+```
 
-foxp3stimObj <- FindNeighbors(foxp3stimObj, reduction = "umap", dims = 1:2)
-foxp3stimObj <- FindClusters(foxp3stimObj, resolution = 0.5)
+Clustering of Foxp3 expressing cells and seperation of Treg and Tfr
+```{r foxp3-cluster-stim, eval=FALSE}
+foxp3stimObj <- FindNeighbors(foxp3stimObj, reduction = "umap", dims = 1:2, verbose = FALSE)
+foxp3stimObj <- FindClusters(foxp3stimObj, resolution = 0.5, verbose = FALSE)
+save(foxp3stimObj, file = file.path(workDir, "output/foxp3Obj.stim.RData"))
+```
 
-p7 <- DimPlot(foxp3stimObj, group.by = "seurat_clusters", label = TRUE) +
+```{r foxp3-cluster-plot-stim, fig.width=8, fig.height=2.75, fig.align='left'}
+plotStimFoxp3Cluster <- DimPlot(foxp3stimObj, group.by = "seurat_clusters", label = TRUE) +
   theme(legend.position = "none")
- ggarrange(p7, p6)
- 
+ggarrange(plotStimFoxp3Cluster, plotStimTregTfr[[1]], plotStimTregTfr[[2]], legend = FALSE, nrow = 1)
+```
+Clusters 1, 3, 4, 6, 14 are Tfrs.  
+  
+Add Treg/Tfr labels
+```{r foxp3-add-treg-tfr-label-stim, eval=FALSE} 
 foxp3stimObj <- AddMetaData(foxp3stimObj,
-                        metadata = ifelse(test = foxp3stimObj$seurat_clusters %in% c(1, 3, 4, 6, 14),
-                                          yes  = "Tfr",
-                                          no   = "Treg"),
-                        col.name = "FOXP3_subset")
+                            metadata = ifelse(test = foxp3stimObj$seurat_clusters %in% c(1, 3, 4, 6, 14),
+                                              yes  = "Tfr",
+                                              no   = "Treg"),
+                            col.name = "FOXP3_subset")
+save(foxp3stimObj, file = file.path(workDir, "output/foxp3Obj.stim.RData"))
+```
 
- DimPlot(foxp3stimObj, group.by = "FOXP3_subset", label = TRUE) +
+```{r foxp3-add-treg-tfr-label-plot-stim, fig.width=4, fig.height=4}
+DimPlot(foxp3stimObj, group.by = "FOXP3_subset", label = TRUE) +
   theme(legend.position = "none")
 ```
 
+# Session Info
+```{r session-info}
+sessionInfo()
+```

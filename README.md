@@ -13,3 +13,5 @@ output:
 - Seurat object will all cells: (data release) e-mtab-11805.seuratObj.RData  
 - Seurat object with unstimulated T cells: (data release) tcellObj.cca.RData  
 - Seurat object with unstimulated Foxp3 expressing cells (with Treg vs Tfr annotation): [[RDA]](output/foxp3Obj.unstim.RData)  
+- Seurat object with stimulated T cells: (data release) stimObj.cca.RData  
+- Seurat object with stimulated Foxp3 expressing cells (with Treg vs Tfr annotation): [[RDA]](output/foxp3Obj.stim.RData)  
