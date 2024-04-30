@@ -15,6 +15,7 @@ suppressPackageStartupMessages(library(package = "biomaRt"))
 suppressPackageStartupMessages(library(package = "readxl"))
 suppressPackageStartupMessages(library(package = "harmony"))
 suppressPackageStartupMessages(library(package = "ggpubr"))
+suppressPackageStartupMessages(library(package = "DESeq2"))
 suppressPackageStartupMessages(library(package = "tidyverse"))
 ```
 
@@ -496,6 +497,136 @@ save(foxp3stimObj, file = file.path(workDir, "output/foxp3Obj.stim.RData"))
 ```{r foxp3-add-treg-tfr-label-plot-stim, fig.width=4, fig.height=4}
 DimPlot(foxp3stimObj, group.by = "FOXP3_subset", label = TRUE) +
   theme(legend.position = "none")
+```
+
+# Differential expression
+```{r deg, message=FALSE}
+pseudobulkDF <- NULL
+for (SUBSET in unique(foxp3Obj$FOXP3_subset)) {
+  for (SAMPLE in unique(foxp3Obj$orig.ident)) {
+    seuratTemp <- subset(foxp3Obj,
+      subset = orig.ident == SAMPLE &
+        FOXP3_subset == SUBSET)
+    pseudobulkDF <- cbind(pseudobulkDF, 
+                          Matrix::rowSums(seuratTemp$RNA$counts))
+    colnames(pseudobulkDF)[ncol(pseudobulkDF)] <- paste0(SAMPLE, ".", SUBSET)
+  }
+}
+for (SUBSET in unique(foxp3stimObj$FOXP3_subset)) {
+  for (SAMPLE in unique(foxp3stimObj$orig.ident)) {
+    seuratTemp <- subset(foxp3stimObj,
+      subset = orig.ident == SAMPLE &
+        FOXP3_subset == SUBSET)
+    pseudobulkDF <- cbind(pseudobulkDF, 
+                          Matrix::rowSums(seuratTemp$RNA$counts))
+    colnames(pseudobulkDF)[ncol(pseudobulkDF)] <- paste0(SAMPLE, ".", SUBSET)
+  }
+}
+cdataDF <- strsplit(colnames(pseudobulkDF), split = "\\.") %>%
+  do.call(what = rbind) %>%
+  as.data.frame() %>%
+  setNames(nm = c("orig.ident", "FOXP3_subset")) %>%
+  mutate(rowname = colnames(pseudobulkDF)) %>%
+  merge(y = distinct(select(seuratObj@meta.data,
+                            orig.ident,
+                            Characteristics.stimulus.,
+                            Comment.library.construction.)),
+        by = "orig.ident",
+        all.x = TRUE) %>%
+  mutate(Characteristics.stimulus. = ifelse(test = Characteristics.stimulus. == "No pretreatment",
+                                            yes  = "unstim",
+                                            no   = "stim"),
+         goi = paste0(FOXP3_subset, ".", Characteristics.stimulus.),
+         goi = factor(goi),
+         goi = relevel(goi, ref = "Treg.unstim"),
+         Comment.library.construction. = make.names(Comment.library.construction.),
+         Comment.library.construction. = factor(Comment.library.construction.)) %>%
+  slice(match(colnames(pseudobulkDF), table = .$rowname)) %>%
+  column_to_rownames(var = "rowname")
+dds <- DESeqDataSetFromMatrix(countData = pseudobulkDF,
+                              colData   = cdataDF,
+                              design    = ~Comment.library.construction.+goi)
+dds <- DESeq(dds, quiet = TRUE)
+# resultsNames(dds) # lists the coefficients
+res <- results(dds, name="goi_Treg.stim_vs_Treg.unstim")
+degTreg <- filter(as.data.frame(res), padj <= 0.05)
+# write deg file
+degTreg %>%
+  rownames_to_column(var = "gene_name") %>%
+  write_csv(file = file.path(workDir, "output/e-mtab-11805.deg_treg_stim_vs_unstim.csv"))
+cdataDF <- cdataDF %>%
+  mutate(goi = relevel(goi, ref = "Tfr.unstim"))
+dds <- DESeqDataSetFromMatrix(countData = pseudobulkDF,
+                              colData   = cdataDF,
+                              design    = ~Comment.library.construction.+goi)
+dds <- DESeq(dds, quiet = TRUE)
+# resultsNames(dds) # lists the coefficients
+res <- results(dds, name="goi_Tfr.stim_vs_Tfr.unstim")
+degTfr <- filter(as.data.frame(res), padj <= 0.05)
+# write deg file
+degTfr %>%
+  rownames_to_column(var = "gene_name") %>%
+  write_csv(file = file.path(workDir, "output/e-mtab-11805.deg_tfr_stim_vs_unstim.csv"))
+```
+
+List DEGs
+```{r print-deg}
+message("Genes induced in Treg after Ag stim:")
+degTreg %>%
+  rownames_to_column(var = "gene_name") %>% 
+  filter(log2FoldChange > 0) %>%
+  kable()
+
+message("Genes repressed in Treg after Ag stim:")
+degTreg %>%
+  rownames_to_column(var = "gene_name") %>% 
+  filter(log2FoldChange > 0) %>%
+  kable()
+
+message("Genes induced in Tfr after Ag stim:")
+degTfr %>%
+  rownames_to_column(var = "gene_name") %>% 
+  filter(log2FoldChange > 0) %>%
+  kable()
+
+message("Genes repressed in Tfr after Ag stim:")
+degTfr %>%
+  rownames_to_column(var = "gene_name") %>% 
+  filter(log2FoldChange > 0) %>%
+  kable()
+```
+
+# Heatmap
+Heatmap Treg DEGs
+```{r heatmap-deg-treg, warning=FALSE}
+allFoxp3Obj <- merge(x = foxp3Obj, y = foxp3stimObj)
+allFoxp3Obj <- JoinLayers(allFoxp3Obj)
+Idents(allFoxp3Obj) <- allFoxp3Obj$FOXP3_subset
+allFoxp3Obj <- AddMetaData(allFoxp3Obj,
+                           metadata = ifelse(test = allFoxp3Obj$Characteristics.stimulus. == "No pretreatment",
+                                            yes  = "unstim",
+                                            no   = "stim"),
+                           col.name = "stim")
+tregObj <- subset(allFoxp3Obj, idents = "Treg")
+tregObj <- ScaleData(tregObj,
+                     feature         = rownames(degTreg),
+                     vars.to.regress = "Comment.library.construction.",
+                     verbose         = FALSE)
+Idents(tregObj) <- tregObj$stim
+DoHeatmap(tregObj, features = (rownames_to_column(degTreg) %>% filter(log2FoldChange > 0) %>% .$rowname))
+DoHeatmap(tregObj, features = (rownames_to_column(degTreg) %>% filter(log2FoldChange < 0) %>% .$rowname))
+```
+
+Heatmap Tfr DEGs
+```{r heatmap-tfr, warning=FALSE}
+tfrObj <- subset(allFoxp3Obj, idents = "Tfr")
+tfrObj  <- ScaleData(tfrObj,
+                     feature         = rownames(degTfr),
+                     vars.to.regress = "Comment.library.construction.",
+                     verbose         = FALSE)
+Idents(tfrObj) <- tfrObj$stim
+DoHeatmap(tfrObj, features = (rownames_to_column(degTfr) %>% filter(log2FoldChange > 0) %>% .$rowname))
+DoHeatmap(tfrObj, features = (rownames_to_column(degTfr) %>% filter(log2FoldChange < 0) %>% .$rowname))
 ```
 
 # Session Info

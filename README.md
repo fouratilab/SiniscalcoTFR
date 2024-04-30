@@ -15,6 +15,8 @@ output:
 - Seurat object with unstimulated Foxp3 expressing cells (with Treg vs Tfr annotation): [[RDA]](output/foxp3Obj.unstim.RData)  
 - Seurat object with stimulated T cells: (data release) stimObj.cca.RData  
 - Seurat object with stimulated Foxp3 expressing cells (with Treg vs Tfr annotation): [[RDA]](output/foxp3Obj.stim.RData)
+- DEGs stim versus unstim in Tregs: [[CSV]](output/e-mtab-11805.deg_treg_stim_vs_unstim.csv)  
+- DEGs stim versus unstim in Tfrs: [[CSV]](output/e-mtab-11805.deg_tfr_stim_vs_unstim.csv)  
 
 
 ### Analysis of Le Cox C. et al. (2023) dataset
