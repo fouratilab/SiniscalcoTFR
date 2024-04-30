@@ -4,3 +4,10 @@ output/tcellObj.cca.RData
 output/stimObj.cca.RData
 .DS_Store
 output/gse214572.seuratObj.RData
+input/GSM6612136_TC341_TFH_5GEX_matrix.mtx.gz
+input/GSM6612138_TC341_CD25hiTfh_5GEX_matrix.mtx.gz
+input/GSM6612140_TC341_TFR_5GEX_matrix.mtx.gz
+input/GSM6612128_TC174_TFH_5GEX_matrix.mtx.gz
+input/GSM6612130_TC174_CD25hiTfh_5GEX_matrix.mtx.gz
+input/GSM6612132_TC174_TFR_5GEX_matrix.mtx.gz
+input/GSM6612134_TC174_TREG_5GEX_matrix.mtx.gz

@@ -22,7 +22,7 @@ code:
 - preprocessing: [[MD]](code/20240426_siniscalcoTFR.gse214572.md)  
 
 input:
-- Cellranger MTX files: [[DIR]](input/)  
+- Cellranger MTX files: (data release)
   
 output:  
 - Seurat object will all cells: (data release) gse214572.seuratObj.RData  
